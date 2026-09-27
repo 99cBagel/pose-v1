@@ -7,8 +7,7 @@ node_modules/
 .env*
 !.env.example
 
-# Bundled model binary is provisioned during the mobile/PWA build.
-public/models/*.tflite
+# Bundled model files are intentionally versioned so Vercel serves them locally.
 
 # OS/editor files
 .DS_Store

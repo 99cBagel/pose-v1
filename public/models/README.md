@@ -1,5 +1,11 @@
-Place the licensed MoveNet SinglePose Lightning TFLite model here as:
+This Next.js browser app uses the TensorFlow.js MoveNet model format. It cannot load
+a `.tflite` file directly. Place the TensorFlow.js model bundle here as:
 
-`movenet_singlepose_lightning.tflite`
+```
+public/models/movenet-lightning/model.json
+public/models/movenet-lightning/group1-shard*.bin
+```
 
-The application intentionally references this local asset rather than a hosted TensorFlow URL. Bundle it into the Android/iOS app package (or precache it in the PWA) before enabling offline guidance.
+The application intentionally references `/models/movenet-lightning/model.json` rather
+than a hosted TensorFlow URL. Bundle these files into the Android/iOS app package (or
+precache them in the PWA) before enabling offline guidance.
