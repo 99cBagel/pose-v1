@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as posedetection from "@tensorflow-models/pose-detection";
+import * as tf from "@tensorflow/tfjs-core";
 import "@tensorflow/tfjs-backend-webgl";
 import type { Point, WorkerEvent } from "../lib/pose-contract";
 
@@ -49,6 +50,11 @@ export function PoseAlignCamera() {
       v.srcObject = stream.current;
       v.onloadedmetadata = sizeCanvas;
       await v.play(); sizeCanvas();
+      // Initialize the TF.js backend before any TF call: pose-detection
+      // registers the WebGPU backend (async init), so creating the detector
+      // without awaiting tf.ready() throws "backend 'webgpu' has not yet
+      // been initialized". ready() uses WebGPU where available, else WebGL.
+      await tf.ready();
       const config = { modelType: posedetection.movenet.modelType.SINGLEPOSE_LIGHTNING, enableSmoothing: true };
       try { detector.current = await posedetection.createDetector(posedetection.SupportedModels.MoveNet, { ...config, modelUrl: LOCAL_MODEL_URL }); }
       catch { detector.current = await posedetection.createDetector(posedetection.SupportedModels.MoveNet, config); }
