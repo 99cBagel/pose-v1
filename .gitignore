@@ -1,0 +1,15 @@
+# Dependencies and framework output
+node_modules/
+.next/
+.pnpm-store/
+
+# Local environment files
+.env*
+!.env.example
+
+# Bundled model binary is provisioned during the mobile/PWA build.
+public/models/*.tflite
+
+# OS/editor files
+.DS_Store
+*.log
