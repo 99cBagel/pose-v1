@@ -1,2 +1,2 @@
-import { PoseAlignCamera } from "./components/PoseAlignCamera";
-export default function Page() { return <PoseAlignCamera />; }
+import { SquatCounterView } from "./components/SquatCounter";
+export default function Page() { return <SquatCounterView />; }

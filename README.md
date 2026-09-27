@@ -1,29 +1,40 @@
-# pose-v1-prep-worker
+# pose-v1 — squat counter
 
-Mobile-first Next.js camera worker for reaching the V1 squat-camera viewpoint. It runs MoveNet inference, direction selection, and speech entirely in the browser; camera frames and keypoints are never sent to a server.
+Mobile-first Next.js app that counts squats using the phone's motion sensor.
+No camera, no video, no pose model — just the accelerometer and a rep-detection
+algorithm, all on-device.
 
 ## Run
 
-```powershell
-cd C:\002-workspace\pose-trainer\pose-v1-prep
+```sh
 pnpm install
 pnpm dev
 ```
 
-Open the app over HTTPS (or `localhost`) on Android/iOS, allow the front camera, and tap **Begin**. For a native shell, use the same local web bundle in a Capacitor/WebView container and route `speak` events to the platform TTS implementation.
+Open the app over HTTPS (or `localhost`) on Android/iOS, put the phone in your
+pocket or strap it to your thigh, and tap **Start**.
 
-## Model
+## How it counts
 
-The MoveNet SinglePose Lightning v4 weights are bundled in `public/models/movenet-lightning/` (TF.js graph-model format, downloaded from TFHub), so the app runs fully offline with zero model-download latency. If the bundled files are ever missing, the app falls back to the TensorFlow.js default hosted model. To refresh the bundle, download the **TensorFlow.js** variation of Google MoveNet SinglePose Lightning v4 (a tarball containing `model.json` + `group*-shard*.bin`) and unpack it into `public/models/movenet-lightning/`.
+`app/lib/squat-counter.ts`:
 
-## Architecture
+1. Gravity is estimated with a slow per-axis EMA.
+2. Linear acceleration is taken along the gravity-dominant axis (the axis most
+   aligned with "down") — the vertical motion channel, robust to phone orientation.
+3. A band-pass (fast EMA minus slow EMA) turns each squat rep into one
+   oscillation lobe centered on zero, and attenuates fast content
+   (footsteps, shaking) below the counting floor.
+4. Humps in the signal are confirmed as lobes via a hysteresis drop so each
+   hump counts exactly once. A lobe is kept when it clears an adaptive
+   threshold, follows a deep valley (one full oscillation per count), and is
+   at least 0.9 s after the previous lobe.
+5. Lobes with no deep valley between them belong to the same rep
+   (bottom-turnaround spike + ascent): the tallest wins, the rep counts once.
+   A deep valley after the candidate closes the rep; a candidate that never
+   sees its closing valley is discarded, never counted.
+6. Arming: the first closed rep only arms the counter; a second rep inside
+   the cadence window retro-counts both and starts counting. A long pause
+   disarms (set ended), so walking or fidgeting between sets isn't counted.
 
-- `app/components/PoseAlignCamera.tsx` owns camera acquisition, MoveNet Lightning inference, the video overlay, and local speech playback. Inference is capped at ~15fps (plenty for voice guidance, kind to batteries), the model is warmed up once at startup, and frames are always forwarded to the worker — even with no pose detected — so it can prompt "stand in front of the camera".
-- `app/workers/pose-v1-prep-worker.ts` owns the V1 readiness loop: presence → framing → viewpoint → 1s hold → `Stop. Ready now.`
-
-## Conventions
-
-- The front-camera display is a mirrored selfie view (`scaleX(-1)` on both video and canvas) and inference runs with `flipHorizontal: true`, so keypoints match what the student sees.
-- All spoken directions are student-relative ("your left" / "your right") and computed in that mirrored space, so they stay correct on front and rear cameras.
-- Prompt vocabulary: `stand in front of the camera`, `step forward`, `step backward`, `move to your left`, `move to your right` (translation), `turn to your left`, `turn to your right` (rotation). Translation and rotation are never conflated.
-- V1 viewpoint gates: shoulder-width/torso ratio 0.50–0.80, nose offset ≤ 0.35. These reproduce the V1 source-video camera angle (slightly off-frontal, which is what makes the squat knee-angle rule work). Tune them only against calibrated V1-labelled video, not a dead-frontal camera angle.
+The chart shows the live vertical-acceleration signal with a marker on every
+counted rep.
