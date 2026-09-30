@@ -1,0 +1,1 @@
+{"compilerOptions":{"declaration":false,"exactOptionalPropertyTypes":true,"lib":["ES2022"],"module":"ESNext","moduleResolution":"bundler","noUncheckedIndexedAccess":true,"outDir":"dist","rootDir":"src","skipLibCheck":true,"sourceMap":false,"strict":true,"target":"ES2022","types":["@cloudflare/workers-types"]},"include":["src/**/*"]}

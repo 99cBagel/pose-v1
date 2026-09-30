@@ -1,8 +1,18 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { SquatCounter } from "../lib/squat-counter";
+import {
+  SessionParams,
+  WorkoutState,
+  fetchState,
+  postMotionEvent,
+  sessionFromUrl,
+} from "../lib/session-client";
+import { speakCue, stopSpeech, unlockSpeech } from "../lib/speech";
 
 type Phase = "idle" | "armed" | "counting";
+type MotionClass = "consistent" | "too fast" | "too slow" | null;
 
 const PHASE_LABEL: Record<Phase, string> = {
   idle: "waiting for motion",
@@ -10,7 +20,11 @@ const PHASE_LABEL: Record<Phase, string> = {
   counting: "counting",
 };
 
-export function SquatCounterView() {
+const POLL_MS = 1500;
+const CADENCE_UPLOAD_MS = 15000;
+
+export function MotionClientView() {
+  const params = useSearchParams();
   const counterRef = useRef<SquatCounter | null>(null);
   if (!counterRef.current) counterRef.current = new SquatCounter();
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -19,6 +33,8 @@ export function SquatCounterView() {
   const listenerRef = useRef<((e: DeviceMotionEvent) => void) | null>(null);
   const samplesRef = useRef(0);
   const firstSampleAtRef = useRef(0);
+  const lastCueIdRef = useRef(0);
+  const sessionRef = useRef<SessionParams | null>(null);
 
   const [running, setRunning] = useState(false);
   const [count, setCount] = useState(0);
@@ -27,6 +43,30 @@ export function SquatCounterView() {
   const [hz, setHz] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [permState, setPermState] = useState<"unknown" | "needed" | "granted">("unknown");
+
+  // ---- session mode ------------------------------------------------------
+  const [session, setSession] = useState<SessionParams | null>(null);
+  const [serverReps, setServerReps] = useState<number | null>(null);
+  const [motionClass, setMotionClass] = useState<MotionClass>(null);
+  const [lastCue, setLastCue] = useState<string | null>(null);
+  const [sessionEnded, setSessionEnded] = useState(false);
+  const [joinId, setJoinId] = useState("");
+  const [joinToken, setJoinToken] = useState("");
+
+  useEffect(() => {
+    // Re-read on mount: useSearchParams is stable, but sessionFromUrl
+    // reads the raw query string so pasted links just work.
+    const s = sessionFromUrl();
+    sessionRef.current = s;
+    setSession(s);
+    void params;
+  }, [params]);
+
+  const endSessionLocally = useCallback((msg: string) => {
+    setSessionEnded(true);
+    setError(msg);
+    stopSpeech();
+  }, []);
 
   // ---- chart -----------------------------------------------------------
   const draw = useCallback(() => {
@@ -56,7 +96,6 @@ export function SquatCounterView() {
     const yOf = (v: number) => midY - (v / peak) * (h / 2 - 14);
     const xOf = (t: number) => ((t - t0) / WIN) * w;
 
-    // grid: zero line
     ctx.strokeStyle = "#2c5960";
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -64,7 +103,6 @@ export function SquatCounterView() {
     ctx.lineTo(w, midY);
     ctx.stroke();
 
-    // signal
     if (hist.length > 1) {
       ctx.strokeStyle = "#70e2e6";
       ctx.lineWidth = 2;
@@ -78,7 +116,6 @@ export function SquatCounterView() {
       ctx.stroke();
     }
 
-    // rep markers
     ctx.strokeStyle = "#8af0be";
     ctx.fillStyle = "#8af0be";
     ctx.lineWidth = 1.5;
@@ -94,7 +131,6 @@ export function SquatCounterView() {
       ctx.fill();
     }
 
-    // axis label
     ctx.fillStyle = "#5f8891";
     ctx.font = "11px system-ui";
     ctx.fillText(`vertical accel (m/s²) · ±${peak.toFixed(1)}`, 8, h - 8);
@@ -115,6 +151,7 @@ export function SquatCounterView() {
       window.removeEventListener("devicemotion", listenerRef.current);
       listenerRef.current = null;
     }
+    stopSpeech();
     setRunning(false);
   }, []);
 
@@ -122,6 +159,7 @@ export function SquatCounterView() {
 
   const start = useCallback(async () => {
     setError(null);
+    setSessionEnded(false);
     const counter = counterRef.current!;
     try {
       if (typeof DeviceMotionEvent === "undefined" || !("DeviceMotionEvent" in window)) {
@@ -136,13 +174,25 @@ export function SquatCounterView() {
         if (res !== "granted") throw new Error("Motion permission was not granted.");
       }
       setPermState("granted");
+      unlockSpeech(); // iOS: speech must start inside the tap gesture
 
+      const sess = sessionRef.current;
       counter.onRep = (_rep, n) => {
         setCount(n);
         setPhase("counting");
+        if (sess) {
+          postMotionEvent(sess, "rep_detected").catch((e) => {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (/40[19]|404/.test(msg)) {
+              endSessionLocally("Session ended or invalid — ask the coach to start a new workout.");
+              stop();
+            }
+          });
+        }
       };
       samplesRef.current = 0;
       firstSampleAtRef.current = 0;
+      lastCueIdRef.current = 0;
 
       const onMotion = (e: DeviceMotionEvent) => {
         const a = e.accelerationIncludingGravity;
@@ -156,7 +206,6 @@ export function SquatCounterView() {
       window.addEventListener("devicemotion", onMotion);
       setRunning(true);
 
-      // watchdog: if the sensor never delivers, say so
       setTimeout(() => {
         if (listenerRef.current && samplesRef.current === 0) {
           setError("No motion data arrived. Keep the page in the foreground and try again.");
@@ -167,7 +216,7 @@ export function SquatCounterView() {
       setError(e instanceof Error ? e.message : "Could not start the motion sensor.");
       stop();
     }
-  }, [stop]);
+  }, [stop, endSessionLocally]);
 
   const reset = useCallback(() => {
     counterRef.current!.reset();
@@ -176,6 +225,11 @@ export function SquatCounterView() {
     setCadence(0);
     setHz(0);
     setError(null);
+    setServerReps(null);
+    setMotionClass(null);
+    setLastCue(null);
+    setSessionEnded(false);
+    stopSpeech();
   }, []);
 
   // stats ticker
@@ -192,12 +246,81 @@ export function SquatCounterView() {
     return () => clearInterval(id);
   }, [running]);
 
+  // ---- session poll: fused state + audio cues ---------------------------
+  useEffect(() => {
+    if (!running || !session || sessionEnded) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const st: WorkoutState = await fetchState(session);
+        if (cancelled) return;
+        setServerReps(st.reps_completed);
+        setMotionClass(st.motion);
+        if (st.status === "ended") {
+          endSessionLocally("Session ended by the coach. Nice work.");
+          stop();
+          return;
+        }
+        const cue = st.cue;
+        if (cue && cue.id !== lastCueIdRef.current) {
+          lastCueIdRef.current = cue.id;
+          setLastCue(cue.text);
+          speakCue(cue.text);
+        }
+      } catch (e) {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/40[19]|404/.test(msg)) {
+          endSessionLocally("Session ended or invalid — ask the coach to start a new workout.");
+          stop();
+        }
+        // transient network blip: keep counting locally, retry next poll
+      }
+    };
+    void poll();
+    const id = setInterval(poll, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [running, session, sessionEnded, stop, endSessionLocally]);
+
+  // ---- periodic cadence upload ------------------------------------------
+  useEffect(() => {
+    if (!running || !session || sessionEnded) return;
+    const id = setInterval(() => {
+      const hzVal = counterRef.current!.cadence() / 60;
+      if (hzVal > 0) {
+        postMotionEvent(session, { type: "cadence_hz", value: hzVal }).catch(() => {});
+      }
+    }, CADENCE_UPLOAD_MS);
+    return () => clearInterval(id);
+  }, [running, session, sessionEnded]);
+
+  const join = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      const id = joinId.trim();
+      const tok = joinToken.trim();
+      if (!id || !tok) {
+        setError("Enter the session code and token from the coach.");
+        return;
+      }
+      window.location.href = `?session=${encodeURIComponent(id)}&token=${encodeURIComponent(tok)}`;
+    },
+    [joinId, joinToken],
+  );
+
+  const motionChipClass =
+    motionClass === "consistent" ? "chip ok" : motionClass ? "chip warn" : "chip";
+
   return (
     <div className="shell">
       <div className="phone">
         <div className="heading">
-          <h1>squat counter</h1>
-          <p>via motion sensor algorithm</p>
+          <h1>pose motion</h1>
+          <p>iPhone motion client · start-my-workout</p>
+          {session && <span className="session-chip">session {session.id}</span>}
         </div>
 
         <div className="count-card">
@@ -205,6 +328,17 @@ export function SquatCounterView() {
           <div className="count-num">{count}</div>
           <div className="count-unit">{count === 1 ? "squat" : "squats"}</div>
         </div>
+
+        {session && lastCue && <div className="cue-card">{lastCue}</div>}
+
+        {session && (
+          <div className="chips">
+            <span className={motionChipClass}>
+              motion: {motionClass ?? "—"}
+            </span>
+            <span className="chip">hub reps: {serverReps ?? "—"}</span>
+          </div>
+        )}
 
         <div className="chart-card" ref={wrapRef}>
           <canvas ref={canvasRef} style={{ width: "100%", height: 190, display: "block" }} />
@@ -232,7 +366,32 @@ export function SquatCounterView() {
         <p className="hint">
           Put the phone in your pocket or strap it to your thigh, then tap Start and squat.
           {permState === "needed" && " Your phone will ask for motion permission."}
+          {session && " Coaching cues play out loud while you work."}
         </p>
+
+        {!session && (
+          <form className="join" onSubmit={join}>
+            <h2>Join a workout session</h2>
+            <p>No link? Type the session code and token the coach gave you.</p>
+            <div className="row">
+              <input
+                value={joinId}
+                onChange={(e) => setJoinId(e.target.value)}
+                placeholder="session code"
+                autoCapitalize="off"
+                autoCorrect="off"
+              />
+              <input
+                value={joinToken}
+                onChange={(e) => setJoinToken(e.target.value)}
+                placeholder="token"
+                autoCapitalize="off"
+                autoCorrect="off"
+              />
+              <button type="submit">Join</button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );

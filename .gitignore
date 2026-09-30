@@ -1,14 +1,18 @@
 # Dependencies and framework output
 node_modules/
 .next/
-.pnpm-store/
+dist/
 
-# Local environment files
+# Worker local state and secrets (dev secret only; production secret lives in Cloudflare)
+.dev.vars
+.wrangler/
 .env*
 !.env.example
 
-# Bundled model files are intentionally versioned so Vercel serves them locally.
+# Bundled model files (web-pose/public/models) are intentionally versioned
+# so the pose client serves MoveNet locally with no CDN dependency.
 
-# OS/editor files
-.DS_Store
+# Build / editor artifacts
 *.log
+.DS_Store
+tsconfig.tsbuildinfo

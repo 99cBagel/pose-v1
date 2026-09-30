@@ -1,40 +1,20 @@
-# pose-v1 — squat counter
+# pose-v1 — start-my-workout monorepo
 
-Mobile-first Next.js app that counts squats using the phone's motion sensor.
-No camera, no video, no pose model — just the accelerometer and a rep-detection
-algorithm, all on-device.
+One repo, three deployables for the start-my-workout fitness form coach
+(see `~/workspace/your_files/start-my-workout-plan.md` for the full plan).
 
-## Run
+| Folder | What | Deploys as |
+|---|---|---|
+| `web-pose/` | Tablet web client (Next.js): `/` session launcher with client links + QR codes, `/pose` MoveNet camera client | `pose-v1.vercel.app` (Vercel Root Directory `web-pose`) |
+| `safari-motion/` | iPhone motion client (Next.js): pocket squat counter, session deep-link, hub ingest/poll, speech cues | `pose-motion.vercel.app` (Vercel Root Directory `safari-motion`) |
+| `workers/start-my-workout/` | Cloudflare Worker: session hub + MCP server, pose/motion fusion, R2 session logs | `start-my-workout.99-cent-bagel.workers.dev` |
 
-```sh
-pnpm install
-pnpm dev
+Each folder builds and deploys independently; there is no root workspace.
+
+## Quick verify
+
+```bash
+(cd web-pose && npm install && npm run build)
+(cd safari-motion && npm install && npm run build)
+(cd workers/start-my-workout && npm install && bash scripts/test.sh)  # needs .dev.vars (gitignored)
 ```
-
-Open the app over HTTPS (or `localhost`) on Android/iOS, put the phone in your
-pocket or strap it to your thigh, and tap **Start**.
-
-## How it counts
-
-`app/lib/squat-counter.ts`:
-
-1. Gravity is estimated with a slow per-axis EMA.
-2. Linear acceleration is taken along the gravity-dominant axis (the axis most
-   aligned with "down") — the vertical motion channel, robust to phone orientation.
-3. A band-pass (fast EMA minus slow EMA) turns each squat rep into one
-   oscillation lobe centered on zero, and attenuates fast content
-   (footsteps, shaking) below the counting floor.
-4. Humps in the signal are confirmed as lobes via a hysteresis drop so each
-   hump counts exactly once. A lobe is kept when it clears an adaptive
-   threshold, follows a deep valley (one full oscillation per count), and is
-   at least 0.9 s after the previous lobe.
-5. Lobes with no deep valley between them belong to the same rep
-   (bottom-turnaround spike + ascent): the tallest wins, the rep counts once.
-   A deep valley after the candidate closes the rep; a candidate that never
-   sees its closing valley is discarded, never counted.
-6. Arming: the first closed rep only arms the counter; a second rep inside
-   the cadence window retro-counts both and starts counting. A long pause
-   disarms (set ended), so walking or fidgeting between sets isn't counted.
-
-The chart shows the live vertical-acceleration signal with a marker on every
-counted rep.

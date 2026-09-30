@@ -1,0 +1,17 @@
+name = "start-my-workout"
+main = "src/index.ts"
+compatibility_date = "2026-09-15"
+
+# Plain (non-secret) vars. WORKOUT_SHARED_SECRET must be set via
+#   wrangler secret put WORKOUT_SHARED_SECRET   (production)
+# or .dev.vars for local dev (see README). Never commit a secret here.
+[vars]
+FORCE_MEMORY_STORE = "0"
+
+# R2 bucket for workout logs. The bucket must exist before deploy:
+#   wrangler r2 bucket create workout-logs
+# Local `wrangler dev` without an account leaves this binding absent;
+# the worker then falls back to an in-memory log store (dev-only).
+[[r2_buckets]]
+binding = "WORKOUT_LOGS"
+bucket_name = "workout-logs"

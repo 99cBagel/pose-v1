@@ -1,0 +1,14 @@
+# Dependencies and framework output
+node_modules/
+.next/
+.pnpm-store/
+
+# Local environment files
+.env*
+!.env.example
+
+# Bundled model files are intentionally versioned so Vercel serves them locally.
+
+# OS/editor files
+.DS_Store
+*.log
