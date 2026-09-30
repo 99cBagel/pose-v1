@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
 
 const MOTION_URL = process.env.NEXT_PUBLIC_MOTION_URL ?? "https://pose-motion.vercel.app";
@@ -12,10 +13,10 @@ function joinLink(base: string, session: string, token: string) {
 }
 
 function ClientCard({
-  title, instruction, base, accent,
-}: { title: string; instruction: string; base: string; accent: string }) {
-  const [session, setSession] = useState("");
-  const [token, setToken] = useState("");
+  title, instruction, base, accent, initialSession, initialToken,
+}: { title: string; instruction: string; base: string; accent: string; initialSession: string; initialToken: string }) {
+  const [session, setSession] = useState(initialSession);
+  const [token, setToken] = useState(initialToken);
   const link = useMemo(() => joinLink(base, session, token), [base, session, token]);
   return (
     <section className="launch-card">
@@ -40,7 +41,12 @@ function ClientCard({
   );
 }
 
-export default function Launcher() {
+function LauncherInner() {
+  // Deep links from start_workout_session carry ?session=..&token=.. —
+  // prefill both cards so the tablet shows the iPhone QR with no typing.
+  const params = useSearchParams();
+  const preSession = params.get("session") ?? "";
+  const preToken = params.get("token") ?? "";
   return (
     <main className="shell">
       <div className="phone">
@@ -53,14 +59,26 @@ export default function Launcher() {
           instruction="Open the link on this tablet, and set the tablet on the ground facing you."
           base="/pose"
           accent="#70e2e6"
+          initialSession={preSession}
+          initialToken={preToken}
         />
         <ClientCard
           title="iPhone · Motion sensor"
           instruction="Need to start motion sensor, use iPhone to scan. Put iPhone in pocket."
           base={MOTION_URL}
           accent="#ffd38c"
+          initialSession={preSession}
+          initialToken={preToken}
         />
       </div>
     </main>
+  );
+}
+
+export default function Launcher() {
+  return (
+    <Suspense>
+      <LauncherInner />
+    </Suspense>
   );
 }
